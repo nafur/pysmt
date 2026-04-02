@@ -137,6 +137,7 @@ class Substituter(pysmt.walkers.IdentityDagWalker):
             # 1. We create a new substitution in which we remove the
             #    bound variables from the substitution map
             substitutions = kwargs["substitutions"]
+            interpretations = kwargs.get("interpretations", {})
             new_subs = {}
             for k,v in substitutions.items():
                 # If at least one bound variable is in the cone of k,
@@ -149,7 +150,8 @@ class Substituter(pysmt.walkers.IdentityDagWalker):
             # 2. We apply the substitution on the quantifier body with
             #    the new 'reduced' map
             sub = self.__class__(self.env)
-            res_formula = sub.substitute(formula.arg(0), new_subs, kwargs['interpretations'])
+            res_formula = sub.substitute(formula.arg(0), new_subs,
+                                         interpretations=interpretations)
 
             # 3. We invoke the relevant function (walk_exists or
             #    walk_forall) to compute the substitution
@@ -191,6 +193,13 @@ class Substituter(pysmt.walkers.IdentityDagWalker):
         - Term substitution
         `self.substitute(phi, {Plus(a, Int(1)): Int(5)})`
         will give `Equals(Function(f, [Int(2), Int(3)]), Int(6))`
+
+        - UF-to-UF substitution (function symbol renaming):
+        `self.substitute(phi, {f: g})`
+        where `f` and `g` are function symbols of the same type will replace
+        all applications of `f` with corresponding applications of `g`.
+        This is syntactic sugar for providing a FunctionInterpretation in
+        `interpretations`.
         """
 
         # Check that formula is a term
@@ -201,6 +210,29 @@ class Substituter(pysmt.walkers.IdentityDagWalker):
             subs = {}
         if interpretations is None:
             interpretations = {}
+
+        # Pre-process subs: if a key is a function symbol (not a term) and
+        # the value is also a function symbol of the same type, auto-convert
+        # to a FunctionInterpretation and move to interpretations.
+        # This allows convenient UF renaming via the subs dict.
+        uf_interps = {}
+        regular_subs = {}
+        for k, v in subs.items():
+            if (k.is_symbol() and not k.is_term() and
+                    v.is_symbol() and not v.is_term() and
+                    k.symbol_type() == v.symbol_type()):
+                param_types = k.symbol_type().param_types
+                formal_params = [self.manager.FreshSymbol(tp) for tp in param_types]
+                body = self.manager.Function(v, formal_params)
+                uf_interps[k] = FunctionInterpretation(formal_params, body,
+                                                       allow_free_vars=True)
+            else:
+                regular_subs[k] = v
+        # Explicit interpretations take priority over auto-generated ones
+        merged_interps = uf_interps
+        merged_interps.update(interpretations)
+        subs = regular_subs
+        interpretations = merged_interps
 
         for i, (k, v) in enumerate(subs.items()):
             # Check that substitutions are terms
@@ -302,8 +334,8 @@ class MSSubstituter(Substituter):
     def __init__(self, env):
         Substituter.__init__(self, env=env)
 
-    def substitute(self, formula, subs):
-        return Substituter.substitute(self, formula, subs)
+    def substitute(self, formula, subs, interpretations=None):
+        return Substituter.substitute(self, formula, subs, interpretations)
 
     def _substitute(self, formula, substitutions):
         """Returns the substitution for formula, if one is defined, otherwise

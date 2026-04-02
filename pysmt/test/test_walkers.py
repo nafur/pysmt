@@ -93,6 +93,23 @@ class TestWalkers(TestCase):
 
         self.assertEqual(subs, ForAll([x], Equals(Int(0), Int(0))))
 
+    def test_substituter_uf_renaming(self):
+        x = Symbol("x", INT)
+        y = Symbol("y", INT)
+        ftype = FunctionType(INT, [INT, INT])
+        f = Symbol("f", ftype)
+        g = Symbol("g", ftype)
+
+        # f(x, y) == 0 should become g(x, y) == 0
+        formula = Equals(Function(f, [x, y]), Int(0))
+        result = substitute(formula, {f: g})
+        self.assertEqual(result, Equals(Function(g, [x, y]), Int(0)))
+
+        # renaming inside a quantifier body
+        formula_q = ForAll([x], Equals(Function(f, [x, y]), Int(0)))
+        result_q = substitute(formula_q, {f: g})
+        self.assertEqual(result_q, ForAll([x], Equals(Function(g, [x, y]), Int(0))))
+
     def test_undefined_node(self):
         varA = Symbol("At", INT)
 
